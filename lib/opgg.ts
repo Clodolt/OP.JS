@@ -1,311 +1,459 @@
-import axios from 'axios';
-import { By, Region } from './parameterss';
-import { Champion, ChampionStats, Passive, Price, Skin, Spell } from './champion';
-import { Season, SeasonInfo } from './season';
-import Summoner from './summoner';
-import { LeagueStats, QueueInfo, Tier } from './league-stats';
-import { Game } from './game';
-import * as cheerio from 'cheerio';
+// @ts-nocheck
+import axios from "axios";
+import { By, Region } from "./parameterss";
+import {
+  Champion,
+  ChampionStats,
+  Passive,
+  Price,
+  Skin,
+  Spell,
+} from "./champion";
+import { Season, SeasonInfo } from "./season";
+import Summoner from "./summoner";
+import { LeagueStats, QueueInfo, Tier } from "./league-stats";
+import { Game } from "./game";
+import * as cheerio from "cheerio";
 
-class OPGG {
-    private summonerId: string | null;
-    private region: Region;
-    private apiUrl: string;
-    private headers: Record<string, string>;
-    private allChampions: Champion[] | undefined;
-    private allSeasons: SeasonInfo[] | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private cachedPageProps: any;
+export default class OPGG {
+  private summonerId: string;
+  private region: Region;
+  private apiUrl: string;
+  private headers;
+  private allChampions: Champion[] | undefined;
+  private allSeasons: SeasonInfo[] | undefined;
+  static pageProperties;
+  constructor() {
+    this.apiUrl = `https://op.gg/api/v1.0/internal/bypass/summoners/${this.region}/${this.summonerId}/summary`;
+    this.headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36",
+    };
+  }
 
-    constructor(summonerId: string | null, region: Region = Region.NA) {
-        this.summonerId = summonerId;
-        this.region = region;
-        this.apiUrl = `https://op.gg/api/v1.0/internal/bypass/summoners/${this.region}/${this.summonerId}/summary`;
-        this.headers = { "User-Agent": "Your User Agent String" };
-        this.allChampions
-        this.allSeasons
-        this.cachedPageProps
-    }
+  public setSummonerId(summonerId: string) {
+    this.summonerId = summonerId;
+    this.apiUrl = `https://op.gg/api/v1.0/internal/bypass/summoners/${this.region}/${this.summonerId}/summary`;
+  }
 
+  public setRegion(region: Region) {
+    this.region = region;
+    this.apiUrl = `https://op.gg/api/v1.0/internal/bypass/summoners/${this.region}/${this.summonerId}/summary`;
+  }
 
-    private refreshApiUrl(): void {
-        this.apiUrl = `https://op.gg/api/v1.0/internal/bypass/summoners/${this.region}/${this.summonerId}/summary`;
-    }
+  public async getSummoner(): Promise<Summoner> {
+    // eslint-disable-next-line no-useless-catch
+    try {
+      const response = await axios.get(this.apiUrl, { headers: this.headers });
 
-    async getSummoner(): Promise<Summoner | null> {
-        console.log(`Sending request to OPGG API... (API_URL = ${this.apiUrl}, HEADERS = ${JSON.stringify(this.headers)})`);
+      const previous_seasons: Season[] = [];
+      const league_stats: LeagueStats[] = []; // Define the LeagueStats type
+      const most_champions: ChampionStats[] = []; // Define the ChampionStats type
+      const recent_game_stats: Game[] = []; // Define the Game type
+      const content = response.data["data"];
+      if (response.status === 200) {
+        for (const season of content["summoner"]["previous_seasons"]) {
+          let temporary_season_info: Season | undefined = undefined;
+          if (this.allSeasons) {
+            temporary_season_info =
+              this.allSeasons.find(
+                (_season) => _season.id === season["season_id"]
+              ) || undefined;
+          }
 
-        try {
-            const response = await axios.get(this.apiUrl, { headers: this.headers });
-            const content = response.data.data;
-
-            const previousSeasons: Season[] = content.summoner.previous_seasons.map((season: any) => new Season(
-                this.allSeasons.find(s => s.id === season.season_id),
-                new Tier(
-                    season.tier_info.tier,
-                    season.tier_info.division,
-                    season.tier_info.lp,
-                    season.tier_info.tier_image_url,
-                    season.tier_info.border_image_url
-                ),
-                new Date(season.created_at)
-            ));
-
-            const leagueStats: LeagueStats[] = content.summoner.league_stats.map((league: any) => new LeagueStats(
-                new QueueInfo(
-                    league.queue_info.id,
-                    league.queue_info.queue_translate,
-                    league.queue_info.game_type
-                ),
-                new Tier(
-                    league.tier_info.tier,
-                    league.tier_info.division,
-                    league.tier_info.lp,
-                    league.tier_info.tier_image_url,
-                    league.tier_info.border_image_url
-                ),
-                league.win,
-                league.lose,
-                league.is_hot_streak,
-                league.is_fresh_blood,
-                league.is_veteran,
-                league.is_inactive,
-                league.series,
-                new Date(league.updated_at)
-            ));
-
-            const mostChampions: ChampionStats[] = content.summoner.most_champions.champion_stats.map((champion: any) => new ChampionStats(
-                this.allChampions.find(c => c.id === champion.id),
-                champion.play,
-                champion.win,
-                champion.lose,
-                champion.kill,
-                champion.death,
-                champion.assist,
-                champion.gold_earned,
-                champion.minion_kill,
-                champion.turret_kill,
-                champion.neutral_minion_kill,
-                champion.damage_dealt,
-                champion.damage_taken,
-                champion.physical_damage_dealt,
-                champion.magic_damage_dealt,
-                champion.most_kill,
-                champion.max_kill,
-                champion.max_death,
-                champion.double_kill,
-                champion.triple_kill,
-                champion.quadra_kill,
-                champion.penta_kill,
-                champion.game_length_second
-            ));
-
-            const recentGameStats: Game[] = content.summoner.recent_game_stats.map((game: any) => new Game(
-                game.game_id,
-                this.allChampions.find(c => c.id === game.champion_id),
-                game.kill,
-                game.death,
-                game.assist,
-                game.position,
-                game.is_win,
-                game.is_remake,
-                game.op_score,
-                game.op_score_rank,
-                game.is_opscore_max_in_team,
-                new Date(game.created_at)
-            ));
-
-            return new Summoner(
-                content.summoner.id,
-                content.summoner.summoner_id,
-                content.summoner.acct_id,
-                content.summoner.puuid,
-                content.summoner.name,
-                content.summoner.internal_name,
-                content.summoner.profile_image_url,
-                content.summoner.level,
-                new Date(content.summoner.updated_at),
-                new Date(content.summoner.renewable_at),
-                previousSeasons,
-                leagueStats,
-                mostChampions,
-                recentGameStats
-            );
-        } catch (error) {
-            console.error(`Error parsing summoner data: ${error}`);
-            return null;
-        }
-    }
-
-    async search(summonerNames: string | string[], region: Region = Region.NA): Promise<Summoner[]> {
-        this.region = region;
-        let pageProperties: any; 
-
-        if (this.cachedPageProps) {
-            pageProperties = this.cachedPageProps;
-        } else {
-            pageProperties = await OPGG.getPageProps(summonerNames, region);
-            this.cachedPageProps = pageProperties;
+          previous_seasons.push(
+            new Season(
+              season["season_id"],
+              new Tier(
+                season["tier_info"]["tier"],
+                season["tier_info"]["division"],
+                season["tier_info"]["lp"],
+                season["tier_info"]["tier_image_url"],
+                season["tier_info"]["border_image_url"]
+              ),
+              season["created_at"]
+            )
+          );
         }
 
-
-        const summoners: Summoner[] = [];
-        for (const id of pageProperties.summoners) {
-            this.summonerId = id.summoner_id;
-            const summoner = await this.getSummoner();
-            summoners.push(summoner);
+        for (const league of content["summoner"]["league_stats"]) {
+          league_stats.push(
+            new LeagueStats(
+              new QueueInfo(
+                league["queue_info"]["id"],
+                league["queue_info"]["queue_translate"],
+                league["queue_info"]["game_type"]
+              ),
+              new Tier(
+                league["tier_info"]["tier"],
+                league["tier_info"]["division"],
+                league["tier_info"]["lp"],
+                league["tier_info"]["tier_image_url"],
+                league["tier_info"]["border_image_url"]
+              ),
+              league["win"],
+              league["lose"],
+              league["is_hot_streak"],
+              league["is_fresh_blood"],
+              league["is_veteran"],
+              league["is_inactive"],
+              league["series"],
+              league["updated_at"]
+            )
+          );
         }
 
-        return summoners;
+        for (const champion of content["summoner"]["most_champions"][
+          "champion_stats"
+        ]) {
+          let temporary_champ: Champion | undefined = undefined;
+          if (this.allChampions) {
+            temporary_champ =
+              this.allChampions.find(
+                (_champion) => _champion.id === champion["id"]
+              ) || undefined;
+          }
+
+          most_champions.push(
+            new ChampionStats(
+              temporary_champ,
+              champion["play"],
+              champion["win"],
+              champion["lose"],
+              champion["kill"],
+              champion["death"],
+              champion["assist"],
+              champion["gold_earned"],
+              champion["minion_kill"],
+              champion["turret_kill"],
+              champion["neutral_minion_kill"],
+              champion["damage_dealt"],
+              champion["damage_taken"],
+              champion["physical_damage_dealt"],
+              champion["magic_damage_dealt"],
+              champion["most_kill"],
+              champion["max_kill"],
+              champion["max_death"],
+              champion["double_kill"],
+              champion["triple_kill"],
+              champion["quadra_kill"],
+              champion["penta_kill"],
+              champion["game_length_second"]
+            )
+          );
+        }
+
+        for (const game of content["recent_game_stats"]) {
+          let temporary_champ: Champion | null = undefined;
+          if (this.allChampions) {
+            temporary_champ =
+              this.allChampions.find(
+                (_champion) => _champion.id === game["champion_id"]
+              ) || undefined;
+          }
+
+          recent_game_stats.push(
+            new Game(
+              game["game_id"],
+              temporary_champ,
+              game["kill"],
+              game["death"],
+              game["assist"],
+              game["position"],
+              game["is_win"],
+              game["is_remake"],
+              game["op_score"],
+              game["op_score_rank"],
+              game["is_opscore_max_in_team"],
+              game["created_at"]
+            )
+          );
+        }
+      } else {
+        throw new Error(`Request failed with status: ${response.status}`);
+      }
+
+      return new Summoner(
+        content["summoner"]["id"],
+        content["summoner"]["summoner_id"],
+        content["summoner"]["acct_id"],
+        content["summoner"]["puuid"],
+        content["summoner"]["name"],
+        content["summoner"]["internal_name"],
+        content["summoner"]["profile_image_url"],
+        content["summoner"]["level"],
+        content["summoner"]["updated_at"],
+        content["summoner"]["renewable_at"],
+        previous_seasons,
+        league_stats,
+        most_champions,
+        recent_game_stats
+      );
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  public async search(
+    summonerNames: string | string[],
+    region: Region = Region.NA
+  ): Promise<Summoner[]> {
+    this.region = region;
+    let pageProperties;
+    if (OPGG.pageProperties) {
+      pageProperties = OPGG.pageProperties;
+      console.log("Using cached page props...");
+    } else {
+      console.log("No cached page props found, fetching...");
+      pageProperties = await OPGG.getPageProps(summonerNames, region); // Assuming getPageProps returns a Promise<PageProps>
+      OPGG.pageProperties = pageProperties;
+      //THIS IS FINE
     }
 
-    static async getPageProps(summoner_names: string | string[] = "abc", region: Region = Region.NA): Promise<any> {
-        if (Array.isArray(summoner_names)) {
-            summoner_names = summoner_names.join(",");
-        }
+    this.allSeasons = await OPGG.getAllSeasons(this.region, pageProperties); // Assuming getAllSeasons returns a Promise<Season[]>
+    this.allChampions = await OPGG.getAllChampions(this.region, pageProperties); // Assuming getAllChampions returns a Promise<Champion[]>
 
-        const url = `https://op.gg/multisearch/${region}?summoners=${summoner_names}`;
-        const headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36"
-        };
+    //THIS IS FINE TOO
 
-        try {
-            const response = await fetch(url, { headers });
-            const htmlContent = await response.text();
-            const $ = cheerio.load(htmlContent);
-
-            return JSON.parse($('#__NEXT_DATA__').text()).props.pageProps;
-        } catch (error) {
-            console.error("Error fetching page properties:", error);
-            return {};
-        }
+    const summoners: Summoner[] = [];
+    for (const id of pageProperties.summoners) {
+      this.summonerId = id.summoner_id; //this is fine
+      const summoner = await this.getSummoner(); // THIS BREAKS, INVESTIGATE
+      summoners.push(summoner);
+      console.log(summoner);
     }
 
-    static async getAllSeasons(region: Region = Region.NA, pageProperties: any): Promise<SeasonInfo[]> {
-        if (!pageProperties) {
-            pageProperties = await OPGG.getPageProps(region);
-        }
+    return summoners;
+  }
 
-        const seasons: SeasonInfo[] = Object.values(pageProperties['seasonsById']).map((season: any) => ({
-            id: season["id"],
-            value: season["value"],
-            displayValue: season["display_value"],
-            isPreseason: season["is_preseason"]
-        }));
-
-        return seasons;
+  public static async getPageProps(
+    summonerNames: string | string[] = "abc",
+    region: Region = Region.NA
+  ): Promise<any> {
+    if (Array.isArray(summonerNames)) {
+      summonerNames = summonerNames.join(",");
     }
 
-    static async getSeasonBy(by: By, value: number | string | number[] | string[]): Promise<SeasonInfo | SeasonInfo[]> {
-        const allSeasons = await OPGG.getAllSeasons();
-        let resultSet: SeasonInfo[] = [];
+    const url = `https://op.gg/multisearch/${region}?summoners=${summonerNames}`;
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36",
+    };
 
-        if (by === By.ID) {
-            resultSet = Array.isArray(value) ? allSeasons.filter(season => value.includes(season.id)) : allSeasons.filter(season => season.id === value);
-        }
-        return resultSet.length > 1 ? resultSet : resultSet[0];
+    try {
+      const response = await axios.get(url, { headers: headers });
+      const $ = cheerio.load(response.data);
+
+      // Parse the HTML content as needed
+      // This is a placeholder, adjust the selector as per actual HTML structure
+      const pageProperties = JSON.parse($("#__NEXT_DATA__").text()).props
+        .pageProps;
+
+      // TODO: Build out the champion and season objects here
+      // ...
+
+      return pageProperties;
+    } catch (error) {
+      console.error(`Error in getPageProps: ${error}`);
+      throw error;
+    }
+  }
+
+  public static async getAllSeasons(
+    region: Region = Region.NA,
+    pageProperties: any = undefined
+  ): Promise<SeasonInfo[]> {
+    // TODO: Revisit this caching logic, as there might be a better way to handle it
+    if (pageProperties === null) {
+      pageProperties = await this.getPageProps(region); // Assuming getPageProps is a static method in the same class
+      OPGG.pageProperties = pageProperties;
     }
 
-    static async getAllChampions(region: Region = Region.NA, pageProperties: any = null): Promise<Champion[]> {
-        if (!pageProperties) {
-            try {
-                const response = await axios.get(`https://op.gg/api/path/to/champions/${region}`);
-                pageProperties = response.data;
-            } catch (error) {
-                console.error('Error fetching champion data:', error);
-                return [];
+    const seasons: SeasonInfo[] = [];
+    for (const season of Object.values(pageProperties["seasonsById"])) {
+      seasons.push(
+        new SeasonInfo(
+          season["id"],
+          season["value"],
+          season["display_value"],
+          season["is_preseason"]
+        )
+      );
+    }
+
+    return seasons;
+  }
+
+  public static async getSeasonBy(
+    by: By,
+    value: number | string | number[] | string[]
+  ): Promise<SeasonInfo | SeasonInfo[]> {
+    const allSeasons = await OPGG.getAllSeasons(); // Assuming getAllSeasons is a static method in the same class
+    const resultSet: SeasonInfo[] = [];
+
+    if (by === By.ID) {
+      if (Array.isArray(value)) {
+        for (const season of allSeasons) {
+          for (const id of value) {
+            if (season.id === id) {
+              resultSet.push(season);
             }
+          }
         }
-
-        const champions: Champion[] = Object.values(pageProperties["championsById"]).map((championData: any) => {
-            const spells: Spell[] = championData.spells.map((spellData: any) => new Spell(
-                spellData.key,
-                spellData.name,
-                spellData.description,
-                spellData.max_rank,
-                spellData.range_burn,
-                spellData.cooldown_burn,
-                spellData.cost_burn,
-                spellData.tooltip,
-                spellData.image_url,
-                spellData.video_url
-            ));
-
-            const skins: Skin[] = championData.skins.map((skinData: any) => {
-                const prices: Price[] = skinData.prices ? skinData.prices.map((priceData: any) => new Price(
-                    priceData.currency.includes("RP") ? "RP" : "BE",
-                    priceData.cost
-                )) : [];
-
-                return new Skin(
-                    skinData.id,
-                    skinData.name,
-                    skinData.centered_image,
-                    skinData.skin_video_url,
-                    prices,
-                    skinData.sales
-                );
-            });
-
-            return new Champion(
-                championData.id,
-                championData.key,
-                championData.name,
-                championData.image_url,
-                championData.evolve,
-                new Passive(
-                    championData.passive.name,
-                    championData.passive.description,
-                    championData.passive.image_url,
-                    championData.passive.video_url
-                ),
-                spells,
-                skins
-            );
-        });
-
-        return champions;
-    }
-
-    static async getChampionBy(by: By, value: number | string | number[] | string[], kwargs?: any): Promise<Champion | Champion[]> {
-        const allChampions = await OPGG.getAllChampions();
-        let resultSet: Champion[] = [];
-
-        switch (by) {
-            case By.ID: {
-                resultSet = this.filterChampions(allChampions, 'id', value);
-                break;
-            }
-            case By.KEY: {
-                resultSet = this.filterChampions(allChampions, 'key', value);
-                break;
-            }
-            case By.NAME: {
-                resultSet = this.filterChampions(allChampions, 'name', value);
-                break;
-            }
-            case By.COST: {
-                resultSet = this.filterChampionsByCost(allChampions, value, kwargs?.currency);
-                break;
-            }
+      } else {
+        const valueAsNumber =
+          typeof value === "string" ? Number.parseInt(value) : value;
+        for (const season of allSeasons) {
+          if (season.id === valueAsNumber) {
+            resultSet.push(season);
+          }
         }
-
-        return resultSet.length > 1 ? resultSet : resultSet[0];
+      }
     }
 
-    private static filterChampions(champions: Champion[], key: keyof Champion, value: number | string | number[] | string[]): Champion[] {
-        return Array.isArray(value)
-            ? champions.filter(champion => value.includes(champion[key]))
-            : champions.filter(champion => champion[key] === value);
+    // TODO: Add more ways to get season objs, like by is_preseason, display_name, etc.
+
+    return resultSet.length > 1 ? resultSet : resultSet[0];
+  }
+
+  public static async getAllChampions(
+    region: Region = Region.NA,
+    pageProperties: any = undefined
+  ): Promise<Champion[]> {
+    // TODO: Revisit this caching logic, there might be a better way
+    if (pageProperties === null) {
+      pageProperties = await OPGG.getPageProps(region); // Assuming getPageProps is a static method in the same class
+      OPGG.pageProperties = pageProperties;
     }
 
-    private static filterChampionsByCost(champions: Champion[], cost: number | number[], currency: string = 'BE'): Champion[] {
-        return champions.filter(champion => 
-            champion.skins.some(skin => 
-                skin.prices.some(price => 
-                    price.currency === currency && (Array.isArray(cost) ? cost.includes(price.cost) : price.cost === cost)
+    const champions: Champion[] = [];
+
+    for (const champion of Object.values(pageProperties["championsById"])) {
+      const spells: Spell[] = champion.spells.map(
+        (spell: any) =>
+          new Spell(
+            spell["key"],
+            spell["name"],
+            spell["description"],
+            spell["max_rank"],
+            spell["range_burn"],
+            spell["cooldown_burn"],
+            spell["cost_burn"],
+            spell["tooltip"],
+            spell["image_url"],
+            spell["video_url"]
+          )
+      );
+
+      const skins: Skin[] = champion.skins.map((skin: any) => {
+        const prices: Price[] | null = skin["prices"]
+          ? skin["prices"].map(
+              (price: any) =>
+                new Price(
+                  price["currency"].includes("RP") ? price["currency"] : "BE",
+                  price["cost"]
                 )
             )
+          : undefined;
+
+        return new Skin(
+          skin["id"],
+          skin["name"],
+          skin["centered_image"],
+          skin["skin_video_url"],
+          prices,
+          skin["sales"]
         );
+      });
+
+      champions.push(
+        new Champion(
+          champion["id"],
+          champion["key"],
+          champion["name"],
+          champion["image_url"],
+          champion["evolve"],
+          new Passive(
+            champion["passive"]["name"],
+            champion["passive"]["description"],
+            champion["passive"]["image_url"],
+            champion["passive"]["video_url"]
+          ),
+          spells,
+          skins
+        )
+      );
     }
+
+    return champions;
+  }
+
+  public static async getChampionBy(
+    by: By,
+    value: number | string | Array<number | string>,
+    additionalArguments?: any
+  ): Promise<Champion | Champion[]> {
+    const allChamps = await OPGG.getAllChampions(); // Assuming getAllChampions is a static method in the same class
+    const resultSet: Champion[] = [];
+
+    switch (by) {
+      case By.ID: {
+        for (const champ of allChamps) {
+          if (Array.isArray(value)) {
+            if (value.includes(champ.id)) {
+              resultSet.push(champ);
+            }
+          } else if (champ.id === value) {
+            resultSet.push(champ);
+          }
+        }
+        break;
+      }
+
+      case By.KEY: {
+        for (const champ of allChamps) {
+          if (Array.isArray(value)) {
+            if (value.includes(champ.key)) {
+              resultSet.push(champ);
+            }
+          } else if (champ.key === value) {
+            resultSet.push(champ);
+          }
+        }
+        break;
+      }
+
+      case By.NAME: {
+        for (const champ of allChamps) {
+          if (Array.isArray(value)) {
+            if (value.includes(champ.name)) {
+              resultSet.push(champ);
+            }
+          } else if (champ.name === value) {
+            resultSet.push(champ);
+          }
+        }
+        break;
+      }
+
+      case By.COST: {
+        for (const champ of allChamps) {
+          if (champ.skins[0]?.prices) {
+            for (const price of champ.skins[0].prices) {
+              if (
+                additionalArguments?.currency?.toUpperCase() ===
+                  price.currency &&
+                value.includes(price.cost)
+              ) {
+                resultSet.push(champ);
+              }
+            }
+          }
+        }
+        break;
+      }
+    }
+
+    return resultSet.length > 1 ? resultSet : resultSet[0];
+  }
 }
